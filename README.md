@@ -151,3 +151,212 @@ Each should drop in behind the same `attention_forward_*` signature so `main.cu`
 ## License
 
 MIT.
+
+
+***
+# GPU Attention Kernels Benchmark
+
+This project implements and benchmarks different GPU-based attention mechanisms, including naive, tiled, and fused variants. The goal is to study performance trade-offs and memory behavior for large sequence lengths on modern GPUs.
+
+---
+
+## Project Structure
+
+```
+gpu-attention-kernels/
+├── benchmarks/        # Benchmark driver (main entry point)
+├── src/
+│   ├── kernels/      # Low-level CUDA kernels (softmax, transpose, etc.)
+│   ├── wrappers/     # Full attention implementations
+│   └── reference.cpp # CPU reference implementation (for correctness)
+├── data/             # Pre-generated input tensors (.npy)
+├── python/           # Data generation scripts
+├── build/            # Build directory (generated)
+└── CMakeLists.txt
+```
+
+---
+
+## Setup
+
+### 1. Build
+
+```bash
+mkdir -p build
+cd build
+cmake ..
+make -j
+```
+
+---
+
+## Data Generation
+
+We use fixed input data to ensure reproducible benchmarking across runs.
+
+Generate data:
+
+```bash
+cd python
+python3 generate_data.py
+```
+
+This creates:
+
+```
+data/
+  X_128.npy
+  Wq_128.npy
+  Wk_128.npy
+  Wv_128.npy
+  ...
+```
+
+---
+
+## Running on Perlmutter (GPU REQUIRED)
+
+Do NOT run on login nodes.
+
+### Allocate a GPU node:
+
+```bash
+salloc --nodes 1 --qos interactive --time 01:00:00 --constraint gpu --account=<your_account>
+```
+
+### Verify GPU:
+
+```bash
+nvidia-smi
+```
+
+---
+
+## Running Benchmarks
+
+From the `build/` directory:
+
+```bash
+./bench naive
+./bench tiled
+./bench fused
+```
+
+---
+
+## Output Format
+
+```
+kernel=naive
+seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err
+128,0.160,...
+256,0.215,...
+...
+```
+
+### Metrics
+
+- **mean_ms / min_ms / max_ms** → runtime statistics  
+- **workspace_MB** → memory used by intermediate buffers  
+- **peak_MB** → peak GPU memory usage  
+- **max_abs_err** → correctness vs CPU reference  
+  - `skip` = correctness not checked (large inputs)
+
+---
+
+## Correctness Checking
+
+For small sequence lengths (≤ 512), we compare:
+
+```
+GPU implementation vs CPU reference
+```
+
+using max absolute error.
+
+Large inputs skip correctness due to high CPU cost.
+
+---
+
+## Adding New Implementations
+
+### Step 1: Add wrapper
+
+Create a new file:
+
+```
+src/wrappers/attention_<name>.cu
+```
+
+Implement:
+
+```cpp
+void attention_forward_<name>(...);
+```
+
+---
+
+### Step 2: Register in `attention.h`
+
+```cpp
+void attention_forward_<name>(...);
+```
+
+---
+
+### Step 3: Add to benchmark
+
+Update kernel selection in `benchmark.cu`:
+
+```cpp
+if (kernel == "<name>") {
+    attention_fn = attention_forward_<name>;
+}
+```
+
+---
+
+### Step 4: Add to CMake
+
+```cmake
+src/wrappers/attention_<name>.cu
+```
+
+---
+
+### Step 5: Rebuild
+
+```bash
+cd build
+rm -rf *
+cmake ..
+make -j
+```
+
+---
+
+## Benchmarking Workflow
+
+```
+generate_data.py → data/ → benchmark.cu → GPU kernels → results
+```
+
+---
+
+## Notes
+
+- Baseline uses cuBLAS-backed GEMM
+- Softmax and transpose are custom CUDA kernels
+- All runs are deterministic due to fixed input data
+- Performance scales roughly O(S²)
+
+---
+
+## Future Work
+
+- Tiled attention implementation  
+- FlashAttention-style fused kernels  
+- Performance comparison across implementations  
+- Throughput / GFLOPs analysis  
+
+---

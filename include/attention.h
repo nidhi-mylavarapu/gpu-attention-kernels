@@ -30,10 +30,29 @@ void free_workspace(AttentionWorkspace& ws);
 // X:    [B, S, D_model]
 // W_*:  [D_model, D_model]
 // Out:  [B, S, D_model]  (written to out_BSD)
-void attention_forward_naive(cublasHandle_t handle,
-                             const float* X, const float* Wq,
-                             const float* Wk, const float* Wv,
-                             float* out_BSD,
-                             AttentionWorkspace& ws,
-                             const AttentionConfig& cfg,
-                             cudaStream_t stream = 0);
+void attention_forward_naive(
+    cublasHandle_t,
+    const float*, const float*, const float*, const float*,
+    float*,
+    AttentionWorkspace&,
+    const AttentionConfig&,
+    cudaStream_t
+);
+
+void attention_forward_tiled(
+    cublasHandle_t,
+    const float*, const float*, const float*, const float*,
+    float*,
+    AttentionWorkspace&,
+    const AttentionConfig&,
+    cudaStream_t
+);
+
+void attention_forward_fused(
+    cublasHandle_t,
+    const float*, const float*, const float*, const float*,
+    float*,
+    AttentionWorkspace&,
+    const AttentionConfig&,
+    cudaStream_t
+);
