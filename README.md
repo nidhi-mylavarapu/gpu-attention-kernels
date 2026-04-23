@@ -342,11 +342,3 @@ generate_data.py → data/ → benchmark.cu → GPU kernels → results
 
 ---
 
-## Notes
-
-- Baseline uses cuBLAS-backed GEMM
-- Softmax and transpose are custom CUDA kernels
-- All runs are deterministic due to fixed input data
-- Performance scales roughly O(S²)
-
----
