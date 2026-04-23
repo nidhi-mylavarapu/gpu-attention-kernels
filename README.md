@@ -350,12 +350,3 @@ generate_data.py → data/ → benchmark.cu → GPU kernels → results
 - Performance scales roughly O(S²)
 
 ---
-
-## Future Work
-
-- Tiled attention implementation  
-- FlashAttention-style fused kernels  
-- Performance comparison across implementations  
-- Throughput / GFLOPs analysis  
-
----
