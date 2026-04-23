@@ -216,12 +216,11 @@ data/
 
 ## Running on Perlmutter (GPU REQUIRED)
 
-Do NOT run on login nodes.
 
 ### Allocate a GPU node:
 
 ```bash
-salloc --nodes 1 --qos interactive --time 01:00:00 --constraint gpu --account=<your_account>
+salloc --nodes 1 --qos interactive --time 01:00:00 --constraint gpu --account=<acc>
 ```
 
 ### Verify GPU:
