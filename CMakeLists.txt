@@ -8,10 +8,10 @@ set(CMAKE_CUDA_ARCHITECTURES 80 86 89)
 find_package(CUDAToolkit REQUIRED)
 
 add_executable(bench
-    main.cu
-    attention.cu
-    kernels.cu
-    reference.cpp
+    benchmarks/benchmark.cu
+    src/wrappers/attention_naive.cu
+    src/kernels/kernels.cu
+    src/reference.cpp
 )
 target_include_directories(bench PRIVATE .)
 target_link_libraries(bench PRIVATE CUDA::cublas CUDA::cudart)
