@@ -214,7 +214,7 @@ data/
 
 ---
 
-## Running on Perlmutter (GPU REQUIRED)
+## Running on Perlmutter
 
 
 ### Allocate a GPU node:
