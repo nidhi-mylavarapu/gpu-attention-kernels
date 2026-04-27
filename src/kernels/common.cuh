@@ -9,7 +9,8 @@
     cudaError_t err = (call);                                            \
     if (err != cudaSuccess) {                                            \
         fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__,    \
-                cudaGetErrorString(err)); std::exit(1);                  \
+                cudaGetErrorString(err));                                \
+        std::exit(1);                                                    \
     }                                                                    \
 } while (0)
 
@@ -17,7 +18,8 @@
     cublasStatus_t s = (call);                                           \
     if (s != CUBLAS_STATUS_SUCCESS) {                                    \
         fprintf(stderr, "cuBLAS error %s:%d: %d\n", __FILE__, __LINE__,  \
-                (int)s); std::exit(1);                                   \
+                (int)s);                                                 \
+        std::exit(1);                                                    \
     }                                                                    \
 } while (0)
 

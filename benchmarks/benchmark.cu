@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <fstream>
 
 void cpu_attention_reference(const float*, const float*, const float*,
                              const float*, float*, int, int, int, int);
@@ -29,6 +30,8 @@ struct BenchResult {
     size_t workspace_bytes;
     size_t peak_bytes;
     double max_abs_err;
+    double mean_abs_err;
+    double mean_rel_err;
 };
 
 // ==========================
@@ -43,7 +46,6 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     const int Dm = cfg.d_model();
     const size_t BSD = (size_t)cfg.batch * cfg.seq_len * Dm;
 
-    // Load data
     std::string base = "../data/";
 
     std::vector<float> hX  = load_npy(base + "X_"  + std::to_string(cfg.seq_len) + ".npy");
@@ -51,7 +53,6 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     std::vector<float> hWk = load_npy(base + "Wk_" + std::to_string(cfg.seq_len) + ".npy");
     std::vector<float> hWv = load_npy(base + "Wv_" + std::to_string(cfg.seq_len) + ".npy");
 
-    // Device memory
     float *dX, *dWq, *dWk, *dWv, *dOut;
     CUDA_CHECK(cudaMalloc(&dX,  BSD * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&dWq, hWq.size() * sizeof(float)));
@@ -67,13 +68,11 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     AttentionWorkspace ws{};
     allocate_workspace(ws, cfg);
 
-    // Warmup
-    for (int i = 0; i < warmup; ++i) {
+    for (int i = 0; i < warmup; ++i)
         attention_fn(handle, dX, dWq, dWk, dWv, dOut, ws, cfg, 0);
-    }
+
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    // Timed runs
     std::vector<float> times_ms(iters);
     GpuTimer t;
 
@@ -96,9 +95,11 @@ static BenchResult benchmark_one(cublasHandle_t handle,
 
     r.workspace_bytes = ws.total_bytes;
     r.peak_bytes = mem_peak;
-    r.max_abs_err = std::nan("");
 
-    // Correctness
+    r.max_abs_err = std::nan("");
+    r.mean_abs_err = std::nan("");
+    r.mean_rel_err = std::nan("");
+
     if (check_correctness) {
         std::vector<float> hOut(BSD), hRef(BSD);
 
@@ -110,19 +111,26 @@ static BenchResult benchmark_one(cublasHandle_t handle,
                                 cfg.batch, cfg.seq_len, cfg.n_heads, cfg.d_head);
 
         double max_err = 0.0;
+        double sum_abs = 0.0;
+        double sum_rel = 0.0;
+
         for (size_t i = 0; i < BSD; ++i) {
-            max_err = std::max(max_err,
-                               (double)std::fabs(hOut[i] - hRef[i]));
+            double abs_err = std::fabs(hOut[i] - hRef[i]);
+            double denom = std::fabs(hRef[i]) + 1e-8;
+            double rel_err = abs_err / denom;
+
+            max_err = std::max(max_err, abs_err);
+            sum_abs += abs_err;
+            sum_rel += rel_err;
         }
+
         r.max_abs_err = max_err;
+        r.mean_abs_err = sum_abs / BSD;
+        r.mean_rel_err = sum_rel / BSD;
     }
 
     free_workspace(ws);
-    cudaFree(dX);
-    cudaFree(dWq);
-    cudaFree(dWk);
-    cudaFree(dWv);
-    cudaFree(dOut);
+    cudaFree(dX); cudaFree(dWq); cudaFree(dWk); cudaFree(dWv); cudaFree(dOut);
 
     return r;
 }
@@ -147,38 +155,42 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    std::ofstream fout("../results/" + kernel + ".csv");
+
+    fout << "seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err,mean_abs_err,mean_rel_err\n";
+
     AttentionConfig base{};
-    base.batch   = 1;
+    base.batch = 1;
     base.n_heads = 8;
-    base.d_head  = 64;
+    base.d_head = 64;
 
     const std::vector<int> seq_lens = {128, 256, 512, 1024, 2048, 4096};
-    const int warmup = 3;
-    const int iters  = 10;
 
     cublasHandle_t handle;
     CUBLAS_CHECK(cublasCreate(&handle));
-
-    printf("kernel=%s\n", kernel.c_str());
-    printf("seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err\n");
 
     for (int S : seq_lens) {
         AttentionConfig cfg = base;
         cfg.seq_len = S;
 
-        bool check = (S <= 512);
+        BenchResult r = benchmark_one(handle, cfg, 3, 10, S <= 512, attention_fn);
 
-        BenchResult r = benchmark_one(handle, cfg, warmup, iters, check, attention_fn);
+        fout << r.seq_len << ","
+             << r.mean_ms << ","
+             << r.min_ms << ","
+             << r.max_ms << ","
+             << (r.workspace_bytes / (1024.0 * 1024.0)) << ","
+             << (r.peak_bytes / (1024.0 * 1024.0)) << ",";
 
-        printf("%d,%.3f,%.3f,%.3f,%.1f,%.1f,%s\n",
-               r.seq_len,
-               r.mean_ms,
-               r.min_ms,
-               r.max_ms,
-               r.workspace_bytes / (1024.0 * 1024.0),
-               r.peak_bytes     / (1024.0 * 1024.0),
-               std::isnan(r.max_abs_err) ? "skip" :
-                   std::to_string(r.max_abs_err).c_str());
+        if (std::isnan(r.max_abs_err)) {
+            fout << "skip,skip,skip\n";
+        } else {
+            fout << r.max_abs_err << ","
+                 << r.mean_abs_err << ","
+                 << r.mean_rel_err << "\n";
+        }
+
+        printf("Finished seq_len=%d\n", S);
     }
 
     cublasDestroy(handle);
