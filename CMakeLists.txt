@@ -10,6 +10,7 @@ find_package(CUDAToolkit REQUIRED)
 add_executable(bench
     main.cu
     attention.cu
+    attention_flash.cu
     kernels.cu
     reference.cpp
 )
