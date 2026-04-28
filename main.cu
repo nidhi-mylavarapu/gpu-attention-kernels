@@ -20,8 +20,6 @@ static void fill_randn(std::vector<float>& v, unsigned seed) {
     for (auto& x : v) x = dist(rng);
 }
 
-// Write a flat float buffer to disk. Format is just raw float32, no header —
-// shape is implied by the filename and known to both sides of the benchmark.
 static void dump_floats(const std::string& path, const std::vector<float>& v) {
     std::ofstream f(path, std::ios::binary);
     if (!f) { fprintf(stderr, "Cannot open %s for writing\n", path.c_str()); std::exit(1); }
@@ -46,16 +44,13 @@ struct BenchResult {
 
 static const char* impl_name(Impl i) {
     switch (i) {
-        case Impl::Naive:        return "naive_cublas";
-        case Impl::Flash:        return "flash_simple_cuda";
+        case Impl::Naive:        return "naive";
+        case Impl::Flash:        return "flash";
         case Impl::BandedWindow: return "banded_window";
     }
     return "unknown";
 }
 
-// Generate or load tensors for this seq_len. Always returns the same bytes
-// across runs (deterministic from seed), and writes them to disk so the
-// Python benchmark can load identical data.
 static void prepare_tensors(const AttentionConfig& cfg,
                             const std::string& tensor_dir,
                             std::vector<float>& hX,
@@ -68,13 +63,11 @@ static void prepare_tensors(const AttentionConfig& cfg,
 
     hX.resize(BSD); hWq.resize(WSZ); hWk.resize(WSZ); hWv.resize(WSZ);
 
-    // Seed depends on seq_len so each shape gets distinct (but reproducible) data.
     fill_randn(hX,  100u + cfg.seq_len);
     fill_randn(hWq, 200u + cfg.seq_len);
     fill_randn(hWk, 300u + cfg.seq_len);
     fill_randn(hWv, 400u + cfg.seq_len);
 
-    // Filename includes shape so it's unambiguous which file matches which config.
     char base[256];
     snprintf(base, sizeof(base), "%s/n%d_b%d_h%d_d%d",
              tensor_dir.c_str(), cfg.seq_len, cfg.batch, cfg.n_heads, cfg.d_head);
@@ -117,7 +110,7 @@ static BenchResult benchmark_one(cublasHandle_t handle,
 
     AttentionWorkspace ws{};
     if (impl == Impl::Naive) {
-    allocate_workspace(ws, cfg);
+        allocate_workspace(ws, cfg);
     } else if (impl == Impl::Flash) {
         allocate_workspace_flash(ws, cfg);
     } else {
@@ -125,14 +118,15 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     }
 
     auto run_once = [&]() {
-    if (impl == Impl::Naive) {
-        attention_forward_naive(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
-    } else if (impl == Impl::Flash) {
-        attention_forward_flash(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
-    } else if (impl == Impl::BandedWindow) {
-        attention_forward_banded_window(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
-    }
-};
+        if (impl == Impl::Naive) {
+            attention_forward_naive(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+        } else if (impl == Impl::Flash) {
+            attention_forward_flash(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+        } else if (impl == Impl::BandedWindow) {
+            attention_forward_banded_window(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+        }
+    };
+
     for (int i = 0; i < warmup; ++i) run_once();
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -174,41 +168,74 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     return r;
 }
 
-int main(int argc, char** argv) {
-    AttentionConfig base{};
-    base.batch   = 1;
-    base.n_heads = 8;
-    base.d_head  = 64;
-    base.window_size = 256;   // sliding window width
+static void write_row(std::ofstream& fout, const BenchResult& r) {
+    fout << r.seq_len << ","
+         << r.mean_ms << ","
+         << r.min_ms << ","
+         << r.max_ms << ","
+         << (r.workspace_bytes / (1024.0 * 1024.0)) << ","
+         << (r.peak_bytes / (1024.0 * 1024.0)) << ",";
+    if (std::isnan(r.max_abs_err)) {
+        fout << "skip\n";
+    } else {
+        fout << r.max_abs_err << "\n";
+    }
+}
 
+int main(int argc, char** argv) {
+    std::string mode = "all";
+    int window_size = 256;
+    if (argc > 1) mode = argv[1];
+    if (argc > 2) window_size = std::atoi(argv[2]);
+
+    AttentionConfig base{};
+    base.batch       = 1;
+    base.n_heads     = 8;
+    base.d_head      = 64;
+    base.window_size = window_size;
 
     const std::vector<int> seq_lens = {128, 256, 512, 1024, 2048, 4096, 8192};
     const int warmup = 3, iters = 10;
 
     std::string tensor_dir = "tensors";
-    if (argc > 1) tensor_dir = argv[1];
-    mkdir(tensor_dir.c_str(), 0755);  // ignore EEXIST
+    mkdir(tensor_dir.c_str(), 0755);
+    mkdir("../results", 0755);
 
     cublasHandle_t handle; CUBLAS_CHECK(cublasCreate(&handle));
 
-    printf("impl,seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err\n");
-    for (Impl impl : {Impl::Naive, Impl::Flash, Impl::BandedWindow}) {
+    auto run_impl = [&](Impl impl, const std::string& outpath) {
+        std::ofstream fout(outpath);
+        fout << "seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err\n";
+
+        printf("=== %s -> %s ===\n", impl_name(impl), outpath.c_str());
         for (int S : seq_lens) {
             AttentionConfig cfg = base; cfg.seq_len = S;
             bool check = (S <= 512) && (impl != Impl::BandedWindow);
             BenchResult r = benchmark_one(handle, cfg, impl, warmup, iters, check, tensor_dir);
-            printf("%s,%d,%.3f,%.3f,%.3f,%.1f,%.1f,%s\n",
-                   impl_name(r.impl), r.seq_len, r.mean_ms, r.min_ms, r.max_ms,
-                   r.workspace_bytes / (1024.0 * 1024.0),
-                   r.peak_bytes     / (1024.0 * 1024.0),
-                   std::isnan(r.max_abs_err) ? "skip" :
-                       std::to_string(r.max_abs_err).c_str());
+            write_row(fout, r);
+            printf("  %s seq=%d  mean=%.3f ms  peak=%.1f MB\n",
+                   impl_name(impl), S, r.mean_ms,
+                   r.peak_bytes / (1024.0 * 1024.0));
         }
+    };
+
+    if (mode == "all") {
+        run_impl(Impl::Naive,        "../results/naive.csv");
+        run_impl(Impl::Flash,        "../results/flash.csv");
+        run_impl(Impl::BandedWindow, "../results/banded_window_w" +
+                                     std::to_string(window_size) + ".csv");
+    } else if (mode == "naive") {
+        run_impl(Impl::Naive, "../results/naive.csv");
+    } else if (mode == "flash") {
+        run_impl(Impl::Flash, "../results/flash.csv");
+    } else if (mode == "banded_window") {
+        run_impl(Impl::BandedWindow, "../results/banded_window_w" +
+                                     std::to_string(window_size) + ".csv");
+    } else {
+        fprintf(stderr, "Unknown mode: %s\n", mode.c_str());
+        return 1;
     }
+
     cublasDestroy(handle);
-    fprintf(stderr,
-    "\nTensors written to %s/. Run bench_flash_attn.py to benchmark "
-    "official flash-attn on the same data.\n", tensor_dir.c_str());
     return 0;
 }
-
