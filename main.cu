@@ -1,12 +1,14 @@
-#include "attention.h"
-#include "attention_flash.h"
-#include "common.cuh"
+#include "src/wrappers/attention.h"
+#include "src/wrappers/attention_flash.h"
+#include "src/kernels/common.cuh"
 #include <vector>
 #include <random>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
 #include <string>
+#include <fstream>
+#include <sys/stat.h>
 
 void cpu_attention_reference(const float*, const float*, const float*,
                              const float*, float*, int, int, int, int);
@@ -15,6 +17,19 @@ static void fill_randn(std::vector<float>& v, unsigned seed) {
     std::mt19937 rng(seed);
     std::normal_distribution<float> dist(0.f, 0.02f);
     for (auto& x : v) x = dist(rng);
+}
+
+// Write a flat float buffer to disk. Format is just raw float32, no header —
+// shape is implied by the filename and known to both sides of the benchmark.
+static void dump_floats(const std::string& path, const std::vector<float>& v) {
+    std::ofstream f(path, std::ios::binary);
+    if (!f) { fprintf(stderr, "Cannot open %s for writing\n", path.c_str()); std::exit(1); }
+    f.write(reinterpret_cast<const char*>(v.data()), v.size() * sizeof(float));
+}
+
+static bool file_exists(const std::string& path) {
+    struct stat s;
+    return stat(path.c_str(), &s) == 0;
 }
 
 enum class Impl { Naive, Flash };
@@ -29,21 +44,59 @@ struct BenchResult {
 };
 
 static const char* impl_name(Impl i) {
-    return i == Impl::Naive ? "naive" : "flash";
+    return i == Impl::Naive ? "naive_cublas" : "flash_simple_cuda";
+}
+
+// Generate or load tensors for this seq_len. Always returns the same bytes
+// across runs (deterministic from seed), and writes them to disk so the
+// Python benchmark can load identical data.
+static void prepare_tensors(const AttentionConfig& cfg,
+                            const std::string& tensor_dir,
+                            std::vector<float>& hX,
+                            std::vector<float>& hWq,
+                            std::vector<float>& hWk,
+                            std::vector<float>& hWv) {
+    const int Dm = cfg.d_model();
+    const size_t BSD = (size_t)cfg.batch * cfg.seq_len * Dm;
+    const size_t WSZ = (size_t)Dm * Dm;
+
+    hX.resize(BSD); hWq.resize(WSZ); hWk.resize(WSZ); hWv.resize(WSZ);
+
+    // Seed depends on seq_len so each shape gets distinct (but reproducible) data.
+    fill_randn(hX,  100u + cfg.seq_len);
+    fill_randn(hWq, 200u + cfg.seq_len);
+    fill_randn(hWk, 300u + cfg.seq_len);
+    fill_randn(hWv, 400u + cfg.seq_len);
+
+    // Filename includes shape so it's unambiguous which file matches which config.
+    char base[256];
+    snprintf(base, sizeof(base), "%s/n%d_b%d_h%d_d%d",
+             tensor_dir.c_str(), cfg.seq_len, cfg.batch, cfg.n_heads, cfg.d_head);
+
+    std::string fX  = std::string(base) + "_X.bin";
+    std::string fWq = std::string(base) + "_Wq.bin";
+    std::string fWk = std::string(base) + "_Wk.bin";
+    std::string fWv = std::string(base) + "_Wv.bin";
+
+    if (!file_exists(fX))  dump_floats(fX,  hX);
+    if (!file_exists(fWq)) dump_floats(fWq, hWq);
+    if (!file_exists(fWk)) dump_floats(fWk, hWk);
+    if (!file_exists(fWv)) dump_floats(fWv, hWv);
 }
 
 static BenchResult benchmark_one(cublasHandle_t handle,
                                  const AttentionConfig& cfg,
                                  Impl impl,
                                  int warmup, int iters,
-                                 bool check_correctness)
+                                 bool check_correctness,
+                                 const std::string& tensor_dir)
 {
     const int Dm = cfg.d_model();
     const size_t BSD = (size_t)cfg.batch * cfg.seq_len * Dm;
     const size_t WSZ = (size_t)Dm * Dm;
 
-    std::vector<float> hX(BSD), hWq(WSZ), hWk(WSZ), hWv(WSZ);
-    fill_randn(hX, 1); fill_randn(hWq, 2); fill_randn(hWk, 3); fill_randn(hWv, 4);
+    std::vector<float> hX, hWq, hWk, hWv;
+    prepare_tensors(cfg, tensor_dir, hX, hWq, hWk, hWv);
 
     float *dX, *dWq, *dWk, *dWv, *dOut;
     CUDA_CHECK(cudaMalloc(&dX,  BSD * sizeof(float)));
@@ -67,11 +120,9 @@ static BenchResult benchmark_one(cublasHandle_t handle,
             attention_forward_flash(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
     };
 
-    // Warmup
     for (int i = 0; i < warmup; ++i) run_once();
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    // Timed
     std::vector<float> times_ms(iters);
     GpuTimer t;
     for (int i = 0; i < iters; ++i) {
@@ -119,6 +170,10 @@ int main(int argc, char** argv) {
     const std::vector<int> seq_lens = {128, 256, 512, 1024, 2048, 4096, 8192};
     const int warmup = 3, iters = 10;
 
+    std::string tensor_dir = "tensors";
+    if (argc > 1) tensor_dir = argv[1];
+    mkdir(tensor_dir.c_str(), 0755);  // ignore EEXIST
+
     cublasHandle_t handle; CUBLAS_CHECK(cublasCreate(&handle));
 
     printf("impl,seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err\n");
@@ -126,7 +181,7 @@ int main(int argc, char** argv) {
         for (int S : seq_lens) {
             AttentionConfig cfg = base; cfg.seq_len = S;
             bool check = (S <= 512);
-            BenchResult r = benchmark_one(handle, cfg, impl, warmup, iters, check);
+            BenchResult r = benchmark_one(handle, cfg, impl, warmup, iters, check, tensor_dir);
             printf("%s,%d,%.3f,%.3f,%.3f,%.1f,%.1f,%s\n",
                    impl_name(r.impl), r.seq_len, r.mean_ms, r.min_ms, r.max_ms,
                    r.workspace_bytes / (1024.0 * 1024.0),
@@ -136,5 +191,8 @@ int main(int argc, char** argv) {
         }
     }
     cublasDestroy(handle);
+    fprintf(stderr,
+        "\nTensors written to %s/. Run bench_flash_attn.py to benchmark "
+        "flash-attn on the same data.\n", tensor_dir.c_str());
     return 0;
 }

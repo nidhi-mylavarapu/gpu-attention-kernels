@@ -1,6 +1,6 @@
 #include "attention_flash.h"
-#include "kernels.cuh"
-#include "common.cuh"
+#include "../kernels/kernels.cuh"
+#include "../kernels/common.cuh"
 #include <cmath>
 #include <cfloat>
 

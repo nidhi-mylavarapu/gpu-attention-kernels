@@ -9,10 +9,10 @@ find_package(CUDAToolkit REQUIRED)
 
 add_executable(bench
     main.cu
-    attention.cu
-    attention_flash.cu
-    kernels.cu
-    reference.cpp
+    src/wrappers/attention_naive.cu
+    src/wrappers/attention_flash.cu
+    src/kernels/kernels.cu
+    src/reference.cpp
 )
 target_include_directories(bench PRIVATE .)
 target_link_libraries(bench PRIVATE CUDA::cublas CUDA::cudart)

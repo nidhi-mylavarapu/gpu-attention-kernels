@@ -1,7 +1,7 @@
 // attention.cu
 #include "attention.h"
-#include "kernels.cuh"
-#include "common.cuh"
+#include "../kernels/kernels.cuh"
+#include "../kernels/common.cuh"
 #include <cmath>
 
 void allocate_workspace(AttentionWorkspace& ws, const AttentionConfig& cfg) {
