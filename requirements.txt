@@ -1,0 +1,17 @@
+# Core
+numpy>=1.24
+torch>=2.2
+ 
+# FlashAttention-2 (Tri Dao). Required for the flash_attn_official benchmark.
+#
+# On Perlmutter (or similar HPC clusters):
+#   module load pytorch
+#   pip install --user flash_attn
+#
+# Notes:
+#   - Do the install on a CPU allocation, not a GPU one — the source compile
+#     takes 30-60 minutes and doesn't need a GPU.
+#   - If the build OOMs, prefix with MAX_JOBS=4 (or 2) to limit parallelism.
+#   - At runtime, always `module load pytorch` (the same version you installed
+#     against) before importing flash_attn.
+flash_attn>=2.5
