@@ -10,7 +10,7 @@
 #include <fstream>
 
 void cpu_attention_reference(const float*, const float*, const float*,
-                             const float*, float*, int, int, int, int);
+                             const float*, float*, int, int, int, int, int);
 
 // ==========================
 // Function pointer type
@@ -108,7 +108,8 @@ static BenchResult benchmark_one(cublasHandle_t handle,
 
         cpu_attention_reference(hX.data(), hWq.data(), hWk.data(), hWv.data(),
                                 hRef.data(),
-                                cfg.batch, cfg.seq_len, cfg.n_heads, cfg.d_head);
+                                cfg.batch, cfg.seq_len, cfg.n_heads, cfg.d_head,
+                                cfg.window_size);
 
         double max_err = 0.0;
         double sum_abs = 0.0;
@@ -142,6 +143,10 @@ int main(int argc, char** argv) {
     std::string kernel = "naive";
     if (argc > 1) kernel = argv[1];
 
+    // Optional second arg: window size (only used for "window" kernel).
+    int window_size_arg = 256;
+    if (argc > 2) window_size_arg = std::atoi(argv[2]);
+
     AttentionFn attention_fn = nullptr;
 
     if (kernel == "naive") {
@@ -150,12 +155,20 @@ int main(int argc, char** argv) {
         attention_fn = attention_forward_tiled;
     } else if (kernel == "fused") {
         attention_fn = attention_forward_fused;
+    } else if (kernel == "window") {
+        attention_fn = attention_forward_window;
+    } else if (kernel == "sparse_window") {
+        attention_fn = attention_forward_sparse_window;
     } else {
         printf("Unknown kernel: %s\n", kernel.c_str());
         return 1;
     }
 
-    std::ofstream fout("../results/" + kernel + ".csv");
+    std::string outpath = "../results/" + kernel;
+    if (kernel == "window" || kernel == "sparse_window")
+        outpath += "_w" + std::to_string(window_size_arg);
+    outpath += ".csv";
+    std::ofstream fout(outpath);
 
     fout << "seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err,mean_abs_err,mean_rel_err\n";
 
@@ -163,11 +176,16 @@ int main(int argc, char** argv) {
     base.batch = 1;
     base.n_heads = 8;
     base.d_head = 64;
+    base.window_size = (kernel == "window" || kernel == "sparse_window") ? window_size_arg : 0;
 
     const std::vector<int> seq_lens = {128, 256, 512, 1024, 2048, 4096};
 
     cublasHandle_t handle;
     CUBLAS_CHECK(cublasCreate(&handle));
+
+    if (kernel == "window" || kernel == "sparse_window") {
+        printf("Running %s kernel with window_size=%d\n", kernel.c_str(), base.window_size);
+    }
 
     for (int S : seq_lens) {
         AttentionConfig cfg = base;
