@@ -7,6 +7,7 @@ struct AttentionConfig {
     int seq_len;
     int n_heads;
     int d_head;
+    int window_size;
     int d_model() const { return n_heads * d_head; }
 };
 
@@ -37,3 +38,18 @@ void attention_forward_naive(cublasHandle_t handle,
                              AttentionWorkspace& ws,
                              const AttentionConfig& cfg,
                              cudaStream_t stream = 0);
+
+
+void attention_forward_banded_window(
+    cublasHandle_t handle,
+    const float* X,
+    const float* Wq, const float* Wk, const float* Wv,
+    float* out_BSD,
+    AttentionWorkspace& ws,
+    const AttentionConfig& cfg,
+    cudaStream_t stream = 0);
+
+void allocate_workspace_banded(
+    AttentionWorkspace& ws,
+    const AttentionConfig& cfg,
+    int window_size);

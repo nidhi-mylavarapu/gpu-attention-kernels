@@ -4,8 +4,8 @@
 // we still run launch_window_mask to clean up the boundary entries
 // inside each tile's bounding box that aren't in any query's window.
 #include "attention.h"
-#include "kernels.cuh"
-#include "common.cuh"
+#include "../kernels/kernels.cuh"
+#include "../kernels/common.cuh"
 #include <cmath>
 #include <cfloat>
 #include <algorithm>

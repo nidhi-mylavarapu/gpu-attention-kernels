@@ -16,6 +16,8 @@ add_executable(bench
     src/kernels/window_mask.cu
     src/wrappers/attention_window.cu
     src/kernels/fill.cu
+    src/wrappers/attention_banded_window.cu
+    src/kernels/banded.cu    
     src/wrappers/attention_sparse_window.cu 
 )
 target_include_directories(bench PRIVATE .)

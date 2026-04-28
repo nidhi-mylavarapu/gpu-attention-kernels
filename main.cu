@@ -1,5 +1,6 @@
 #include "src/wrappers/attention.h"
 #include "src/wrappers/attention_flash.h"
+#include "src/wrappers/attention_banded_window.h"
 #include "src/kernels/common.cuh"
 #include <vector>
 #include <random>
@@ -11,7 +12,7 @@
 #include <sys/stat.h>
 
 void cpu_attention_reference(const float*, const float*, const float*,
-                             const float*, float*, int, int, int, int);
+                             const float*, float*, int, int, int, int, int);
 
 static void fill_randn(std::vector<float>& v, unsigned seed) {
     std::mt19937 rng(seed);
@@ -32,7 +33,7 @@ static bool file_exists(const std::string& path) {
     return stat(path.c_str(), &s) == 0;
 }
 
-enum class Impl { Naive, Flash };
+enum class Impl { Naive, Flash, BandedWindow };
 
 struct BenchResult {
     int seq_len;
@@ -44,7 +45,12 @@ struct BenchResult {
 };
 
 static const char* impl_name(Impl i) {
-    return i == Impl::Naive ? "naive_cublas" : "flash_simple_cuda";
+    switch (i) {
+        case Impl::Naive:        return "naive_cublas";
+        case Impl::Flash:        return "flash_simple_cuda";
+        case Impl::BandedWindow: return "banded_window";
+    }
+    return "unknown";
 }
 
 // Generate or load tensors for this seq_len. Always returns the same bytes
@@ -110,16 +116,23 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     CUDA_CHECK(cudaMemcpy(dWv, hWv.data(), WSZ * sizeof(float), cudaMemcpyHostToDevice));
 
     AttentionWorkspace ws{};
-    if (impl == Impl::Naive) allocate_workspace(ws, cfg);
-    else                     allocate_workspace_flash(ws, cfg);
+    if (impl == Impl::Naive) {
+    allocate_workspace(ws, cfg);
+    } else if (impl == Impl::Flash) {
+        allocate_workspace_flash(ws, cfg);
+    } else {
+        allocate_workspace_banded(ws, cfg, cfg.window_size);
+    }
 
     auto run_once = [&]() {
-        if (impl == Impl::Naive)
-            attention_forward_naive(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
-        else
-            attention_forward_flash(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
-    };
-
+    if (impl == Impl::Naive) {
+        attention_forward_naive(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+    } else if (impl == Impl::Flash) {
+        attention_forward_flash(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+    } else if (impl == Impl::BandedWindow) {
+        attention_forward_banded_window(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+    }
+};
     for (int i = 0; i < warmup; ++i) run_once();
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -149,7 +162,7 @@ static BenchResult benchmark_one(cublasHandle_t handle,
                               cudaMemcpyDeviceToHost));
         cpu_attention_reference(hX.data(), hWq.data(), hWk.data(), hWv.data(),
                                 hRef.data(),
-                                cfg.batch, cfg.seq_len, cfg.n_heads, cfg.d_head);
+                                cfg.batch, cfg.seq_len, cfg.n_heads, cfg.d_head, 0);
         double max_err = 0.0;
         for (size_t i = 0; i < BSD; ++i)
             max_err = std::max(max_err, (double)std::fabs(hOut[i] - hRef[i]));
@@ -166,6 +179,8 @@ int main(int argc, char** argv) {
     base.batch   = 1;
     base.n_heads = 8;
     base.d_head  = 64;
+    base.window_size = 256;   // sliding window width
+
 
     const std::vector<int> seq_lens = {128, 256, 512, 1024, 2048, 4096, 8192};
     const int warmup = 3, iters = 10;
@@ -177,10 +192,10 @@ int main(int argc, char** argv) {
     cublasHandle_t handle; CUBLAS_CHECK(cublasCreate(&handle));
 
     printf("impl,seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err\n");
-    for (Impl impl : {Impl::Naive, Impl::Flash}) {
+    for (Impl impl : {Impl::Naive, Impl::Flash, Impl::BandedWindow}) {
         for (int S : seq_lens) {
             AttentionConfig cfg = base; cfg.seq_len = S;
-            bool check = (S <= 512);
+            bool check = (S <= 512) && (impl != Impl::BandedWindow);
             BenchResult r = benchmark_one(handle, cfg, impl, warmup, iters, check, tensor_dir);
             printf("%s,%d,%.3f,%.3f,%.3f,%.1f,%.1f,%s\n",
                    impl_name(r.impl), r.seq_len, r.mean_ms, r.min_ms, r.max_ms,
@@ -192,7 +207,8 @@ int main(int argc, char** argv) {
     }
     cublasDestroy(handle);
     fprintf(stderr,
-        "\nTensors written to %s/. Run bench_flash_attn.py to benchmark "
-        "flash-attn on the same data.\n", tensor_dir.c_str());
+    "\nTensors written to %s/. Run bench_flash_attn.py to benchmark "
+    "official flash-attn on the same data.\n", tensor_dir.c_str());
     return 0;
 }
+

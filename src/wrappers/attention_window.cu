@@ -1,7 +1,7 @@
 // attention_window.cu
 #include "attention.h"
-#include "kernels.cuh"
-#include "common.cuh"
+#include "../kernels/kernels.cuh"
+#include "../kernels/common.cuh"
 #include <cmath>
 
 // Row-major C[M,N] = A[M,K] * B[K,N]  via cuBLAS.
