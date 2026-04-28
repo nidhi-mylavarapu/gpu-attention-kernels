@@ -13,6 +13,10 @@ add_executable(bench
     src/wrappers/attention_flash.cu
     src/kernels/kernels.cu
     src/reference.cpp
+    src/kernels/window_mask.cu
+    src/wrappers/attention_window.cu
+    src/kernels/fill.cu
+    src/wrappers/attention_sparse_window.cu 
 )
 target_include_directories(bench PRIVATE .)
 target_link_libraries(bench PRIVATE CUDA::cublas CUDA::cudart)

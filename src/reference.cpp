@@ -2,11 +2,13 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <cstdlib>
 
 void cpu_attention_reference(
     const float* X, const float* Wq, const float* Wk, const float* Wv,
     float* out,
-    int B, int S, int H, int D)
+    int B, int S, int H, int D,
+    int window_size)        // 0 = no masking (full attention)
 {
     int Dm = H * D;
     auto Xm  = [&](int b,int s,int d){ return X[((size_t)b*S+s)*Dm+d]; };
@@ -32,12 +34,20 @@ void cpu_attention_reference(
     float scale = 1.f / std::sqrt((float)D);
     std::vector<float> row(S);
 
+    const int half = window_size / 2;
+    const bool use_window = (window_size > 0);
+
     for (int b = 0; b < B; ++b)
      for (int h = 0; h < H; ++h)
       for (int i = 0; i < S; ++i) {
         // scores row_i = Q[b,i,h,:] · K[b,j,h,:]  for all j
         float rmax = -INFINITY;
         for (int j = 0; j < S; ++j) {
+            // Window mask: same convention as the GPU kernel.
+            if (use_window && std::abs(i - j) > half) {
+                row[j] = -INFINITY;
+                continue;
+            }
             float s = 0.f;
             for (int d = 0; d < D; ++d) {
                 float qv = Q[((size_t)b*S+i)*Dm + h*D + d];
@@ -49,7 +59,11 @@ void cpu_attention_reference(
             if (s > rmax) rmax = s;
         }
         float sum = 0.f;
-        for (int j = 0; j < S; ++j) { row[j] = std::exp(row[j]-rmax); sum += row[j]; }
+        for (int j = 0; j < S; ++j) {
+            // exp(-inf - rmax) = 0, so masked entries contribute nothing.
+            row[j] = std::exp(row[j]-rmax);
+            sum += row[j];
+        }
         for (int j = 0; j < S; ++j) row[j] /= sum;
 
         // out[b, i, h, :] = sum_j row[j] * V[b, j, h, :]

@@ -7,6 +7,7 @@ struct AttentionConfig {
     int seq_len;
     int n_heads;
     int d_head;
+    int window_size = 0; // 0 = no masking / full attention 
     int d_model() const { return n_heads * d_head; }
 };
 
@@ -55,4 +56,22 @@ void attention_forward_fused(
     AttentionWorkspace&,
     const AttentionConfig&,
     cudaStream_t
+);
+
+void attention_forward_window(
+    cublasHandle_t handle,
+    const float* X, const float* Wq, const float* Wk, const float* Wv,
+    float* Out,
+    AttentionWorkspace& ws,
+    const AttentionConfig& cfg,
+    cudaStream_t stream
+);
+
+void attention_forward_sparse_window(
+    cublasHandle_t handle,
+    const float* X, const float* Wq, const float* Wk, const float* Wv,
+    float* Out,
+    AttentionWorkspace& ws,
+    const AttentionConfig& cfg,
+    cudaStream_t stream
 );
