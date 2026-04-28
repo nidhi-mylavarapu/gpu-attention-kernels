@@ -14,6 +14,10 @@ add_executable(bench
     src/wrappers/attention_fused.cu
     src/kernels/kernels.cu
     src/reference.cpp
+    src/kernels/window_mask.cu
+    src/wrappers/attention_window.cu
+    src/kernels/fill.cu
+    src/wrappers/attention_sparse_window.cu 
 )
 target_include_directories(bench PRIVATE
     include
