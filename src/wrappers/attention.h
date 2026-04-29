@@ -53,3 +53,18 @@ void allocate_workspace_banded(
     AttentionWorkspace& ws,
     const AttentionConfig& cfg,
     int window_size);
+
+
+// Tile-streamed attention with online softmax (see src/kernels/tiled_online_attention.cu).
+// Same external pipeline as naive (cuBLAS projections + head transpose + attention + de-transpose).
+// Workspace omits the [B, H, S, S] score tensor.
+void attention_forward_tiled_online(cublasHandle_t handle,
+                                    const float* X, const float* Wq,
+                                    const float* Wk, const float* Wv,
+                                    float* out_BSD,
+                                    AttentionWorkspace& ws,
+                                    const AttentionConfig& cfg,
+                                    cudaStream_t stream = 0);
+
+void allocate_workspace_tiled_online(AttentionWorkspace& ws,
+                                     const AttentionConfig& cfg);

@@ -1,5 +1,4 @@
 #include "src/wrappers/attention.h"
-#include "src/wrappers/attention_flash.h"
 #include "src/wrappers/attention_banded_window.h"
 #include "src/kernels/common.cuh"
 #include <vector>
@@ -33,7 +32,7 @@ static bool file_exists(const std::string& path) {
     return stat(path.c_str(), &s) == 0;
 }
 
-enum class Impl { Naive, Flash, BandedWindow };
+enum class Impl { Naive, TiledOnline, BandedWindow };
 
 struct BenchResult {
     int seq_len;
@@ -47,7 +46,7 @@ struct BenchResult {
 static const char* impl_name(Impl i) {
     switch (i) {
         case Impl::Naive:        return "naive_cublas";
-        case Impl::Flash:        return "flash_simple_cuda";
+        case Impl::TiledOnline:   return "tiled_online";
         case Impl::BandedWindow: return "banded_window";
     }
     return "unknown";
@@ -117,22 +116,22 @@ static BenchResult benchmark_one(cublasHandle_t handle,
 
     AttentionWorkspace ws{};
     if (impl == Impl::Naive) {
-    allocate_workspace(ws, cfg);
-    } else if (impl == Impl::Flash) {
-        allocate_workspace_flash(ws, cfg);
+        allocate_workspace(ws, cfg);
+    } else if (impl == Impl::TiledOnline) {
+        allocate_workspace_tiled_online(ws, cfg);
     } else {
         allocate_workspace_banded(ws, cfg, cfg.window_size);
     }
 
     auto run_once = [&]() {
-    if (impl == Impl::Naive) {
-        attention_forward_naive(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
-    } else if (impl == Impl::Flash) {
-        attention_forward_flash(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
-    } else if (impl == Impl::BandedWindow) {
-        attention_forward_banded_window(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
-    }
-};
+        if (impl == Impl::Naive) {
+            attention_forward_naive(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+        } else if (impl == Impl::TiledOnline) {
+            attention_forward_tiled_online(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+        } else if (impl == Impl::BandedWindow) {
+            attention_forward_banded_window(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+        }
+    };
     for (int i = 0; i < warmup; ++i) run_once();
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -192,7 +191,7 @@ int main(int argc, char** argv) {
     cublasHandle_t handle; CUBLAS_CHECK(cublasCreate(&handle));
 
     printf("impl,seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err\n");
-    for (Impl impl : {Impl::Naive, Impl::Flash, Impl::BandedWindow}) {
+    for (Impl impl : {Impl::Naive, Impl::TiledOnline, Impl::BandedWindow}) {
         for (int S : seq_lens) {
             AttentionConfig cfg = base; cfg.seq_len = S;
             bool check = (S <= 512) && (impl != Impl::BandedWindow);

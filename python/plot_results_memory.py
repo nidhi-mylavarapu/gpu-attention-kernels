@@ -4,15 +4,15 @@ import numpy as np
 seq = np.array([128, 256, 512, 1024, 2048, 4096, 8192])
 
 naive_peak = np.array([442.1, 446.1, 458.1, 490.1, 604.1, 1024.1, 2632.1])
-flash_peak = np.array([442.1, 444.1, 450.1, 458.1, 476.1, 512.1, 584.1])
+tiled_online_peak = np.array([442.1, 444.1, 450.1, 458.1, 476.1, 512.1, 584.1])
 banded_peak = np.array([444.1, 446.1, 454.1, 466.1, 492.1, 544.1, 648.1])
 
-flash_mem_saving = naive_peak / flash_peak
+tiled_online_mem_saving = naive_peak / tiled_online_peak
 banded_mem_saving = naive_peak / banded_peak
 
 plt.figure(figsize=(10, 6))
 
-plt.plot(seq, flash_mem_saving, marker='D', linewidth=2, label='flash')
+plt.plot(seq, tiled_online_mem_saving, marker='D', linewidth=2, label='tiled_online')
 plt.plot(seq, banded_mem_saving, marker='D', linewidth=2, label='banded window')
 
 plt.axhline(1.0, linestyle='--', color='black', label='naive baseline')

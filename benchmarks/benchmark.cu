@@ -66,7 +66,11 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     CUDA_CHECK(cudaMemcpy(dWv, hWv.data(), hWv.size() * sizeof(float), cudaMemcpyHostToDevice));
 
     AttentionWorkspace ws{};
-    allocate_workspace(ws, cfg);
+    if (attention_fn == attention_forward_tiled_online) {
+        allocate_workspace_tiled_online(ws, cfg);
+    } else {
+        allocate_workspace(ws, cfg);
+    }
 
     for (int i = 0; i < warmup; ++i)
         attention_fn(handle, dX, dWq, dWk, dWv, dOut, ws, cfg, 0);
@@ -153,8 +157,8 @@ int main(int argc, char** argv) {
         attention_fn = attention_forward_naive;
     } else if (kernel == "tiled") {
         attention_fn = attention_forward_tiled;
-    } else if (kernel == "fused") {
-        attention_fn = attention_forward_fused;
+    } else if (kernel == "tiled_online") {
+        attention_fn = attention_forward_tiled_online;
     } else if (kernel == "window") {
         attention_fn = attention_forward_window;
     } else if (kernel == "sparse_window") {

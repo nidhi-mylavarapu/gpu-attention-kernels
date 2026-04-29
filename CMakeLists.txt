@@ -10,8 +10,9 @@ find_package(CUDAToolkit REQUIRED)
 add_executable(bench
     main.cu
     src/wrappers/attention_naive.cu
-    src/wrappers/attention_flash.cu
+    src/wrappers/attention_tiled_online.cu
     src/kernels/kernels.cu
+    src/kernels/tiled_online_attention.cu
     src/reference.cpp
     src/kernels/window_mask.cu
     src/wrappers/attention_window.cu

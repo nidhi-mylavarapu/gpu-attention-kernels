@@ -48,7 +48,7 @@ def plot_all(csvs):
     order = []
     if "naive" in csvs: order.append(("naive", "naive (full attention)", "k", "-", "o"))
     if "tiled" in csvs: order.append(("tiled", "tiled", "tab:gray", "-", "s"))
-    if "fused" in csvs: order.append(("fused", "fused", "tab:purple", "-", "^"))
+    if "tiled_online" in csvs: order.append(("tiled_online", "tiled_online", "tab:purple", "-", "^"))
 
     # window_w* (mask-after-GEMM, no speedup)
     for w in [64, 128, 256, 1024]:

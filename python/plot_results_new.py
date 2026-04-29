@@ -1,27 +1,23 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Data
+# Data (representative bench; refresh from CSV after runs)
 seq = np.array([128, 256, 512, 1024, 2048, 4096, 8192])
 
-naive = np.array([0.162, 0.216, 0.346, 0.648, 1.923, 5.663, 17.366])
-flash = np.array([0.322, 0.566, 1.059, 2.520, 6.608, 25.916, 99.015])
-banded = np.array([0.175, 0.318, 0.607, 1.197, 2.345, 4.685, 9.321])
+naive = np.array([0.160, 0.215, 0.345, 0.647, 1.924, 5.828, 18.757])
+tiled_online = np.array([0.107, 0.194, 0.453, 1.505, 5.281, 20.385, 80.273])
+banded = np.array([0.173, 0.315, 0.605, 1.194, 2.344, 4.683, 9.321])
 
-# Speedups vs naive
-flash_speedup = naive / flash
+tiled_online_speedup = naive / tiled_online
 banded_speedup = naive / banded
 
-# Plot
 plt.figure(figsize=(10, 6))
 
-plt.plot(seq, flash_speedup, marker='D', linewidth=2, label='flash attention')
+plt.plot(seq, tiled_online_speedup, marker='D', linewidth=2, label='tiled_online')
 plt.plot(seq, banded_speedup, marker='D', linewidth=2, label='banded window')
 
-# Baseline line
 plt.axhline(1.0, linestyle='--', color='black', label='naive baseline')
 
-# log2 x-axis labels
 plt.xscale('log', base=2)
 plt.xticks(seq, [rf'$2^{{{int(np.log2(s))}}}$' for s in seq])
 

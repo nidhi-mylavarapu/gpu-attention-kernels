@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run all three implementations and produce a single CSV.
+# Run C++ bench (naive, tiled_online, banded) and append Python flash-attn CSV.
 # Usage: ./run_all_benchmarks.sh [output.csv]
 set -euo pipefail
 
@@ -12,7 +12,7 @@ if [ ! -x ./build/bench ]; then
     exit 1
 fi
 
-echo "=== Running C++ benchmarks (naive + simple flash) ==="
+echo "=== Running C++ bench (naive, tiled_online, banded) ==="
 ./build/bench "$TENSOR_DIR" > "$OUT"
 
 echo "=== Running Python benchmark (official flash-attn) ==="

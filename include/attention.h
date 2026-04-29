@@ -26,6 +26,7 @@ struct AttentionWorkspace {
 };
 
 void allocate_workspace(AttentionWorkspace& ws, const AttentionConfig& cfg);
+void allocate_workspace_tiled_online(AttentionWorkspace& ws, const AttentionConfig& cfg);
 void free_workspace(AttentionWorkspace& ws);
 
 // X:    [B, S, D_model]
@@ -49,7 +50,7 @@ void attention_forward_tiled(
     cudaStream_t
 );
 
-void attention_forward_fused(
+void attention_forward_tiled_online(
     cublasHandle_t,
     const float*, const float*, const float*, const float*,
     float*,
