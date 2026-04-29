@@ -2,7 +2,7 @@
 #include <cuda_runtime.h>
 
 // =============================================================================
-// Banded window attention kernels.
+// Band-buffer kernels for sparse_window attention (sliding window).
 //
 // Band layout: S_band has shape [B*H, N, W]. For query row i, band column c
 // corresponds to absolute key index k = i - half + c, where half = W / 2.

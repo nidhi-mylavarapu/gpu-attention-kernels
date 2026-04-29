@@ -1,13 +1,14 @@
 #include "src/wrappers/attention.h"
-#include "src/wrappers/attention_banded_window.h"
 #include "src/kernels/common.cuh"
 #include <vector>
 #include <random>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
 #include <string>
 #include <fstream>
+#include <sstream>
 #include <sys/stat.h>
 
 void cpu_attention_reference(const float*, const float*, const float*,
@@ -32,7 +33,7 @@ static bool file_exists(const std::string& path) {
     return stat(path.c_str(), &s) == 0;
 }
 
-enum class Impl { Naive, TiledOnline, BandedWindow };
+enum class Impl { Naive, TiledOnline, TiledOnlineWmma, SparseWindow };
 
 struct BenchResult {
     int seq_len;
@@ -45,9 +46,10 @@ struct BenchResult {
 
 static const char* impl_name(Impl i) {
     switch (i) {
-        case Impl::Naive:        return "naive_cublas";
-        case Impl::TiledOnline:   return "tiled_online";
-        case Impl::BandedWindow: return "banded_window";
+        case Impl::Naive:           return "naive_cublas";
+        case Impl::TiledOnline:     return "tiled_online";
+        case Impl::TiledOnlineWmma: return "tiled_online_wmma";
+        case Impl::SparseWindow:    return "sparse_window";
     }
     return "unknown";
 }
@@ -117,10 +119,10 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     AttentionWorkspace ws{};
     if (impl == Impl::Naive) {
         allocate_workspace(ws, cfg);
-    } else if (impl == Impl::TiledOnline) {
+    } else if (impl == Impl::TiledOnline || impl == Impl::TiledOnlineWmma) {
         allocate_workspace_tiled_online(ws, cfg);
     } else {
-        allocate_workspace_banded(ws, cfg, cfg.window_size);
+        allocate_workspace_sparse_window(ws, cfg, cfg.window_size);
     }
 
     auto run_once = [&]() {
@@ -128,8 +130,10 @@ static BenchResult benchmark_one(cublasHandle_t handle,
             attention_forward_naive(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
         } else if (impl == Impl::TiledOnline) {
             attention_forward_tiled_online(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
-        } else if (impl == Impl::BandedWindow) {
-            attention_forward_banded_window(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+        } else if (impl == Impl::TiledOnlineWmma) {
+            attention_forward_tiled_online_wmma(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
+        } else if (impl == Impl::SparseWindow) {
+            attention_forward_sparse_window(handle, dX, dWq, dWk, dWv, dOut, ws, cfg);
         }
     };
     for (int i = 0; i < warmup; ++i) run_once();
@@ -173,6 +177,36 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     return r;
 }
 
+static std::vector<int> parse_int_csv(const std::string& s) {
+    std::vector<int> out;
+    std::stringstream ss(s);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) {
+        if (tok.empty()) continue;
+        out.push_back(std::atoi(tok.c_str()));
+    }
+    return out;
+}
+
+static std::vector<Impl> parse_impls_csv(const std::string& s) {
+    std::vector<Impl> out;
+    std::stringstream ss(s);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) {
+        if (tok == "naive_cublas" || tok == "naive") out.push_back(Impl::Naive);
+        else if (tok == "tiled_online")              out.push_back(Impl::TiledOnline);
+        else if (tok == "tiled_online_wmma")         out.push_back(Impl::TiledOnlineWmma);
+        else if (tok == "sparse_window")             out.push_back(Impl::SparseWindow);
+        else if (!tok.empty()) {
+            fprintf(stderr,
+                    "Unknown impl '%s' (expected naive_cublas|tiled_online|tiled_online_wmma|sparse_window)\n",
+                    tok.c_str());
+            std::exit(1);
+        }
+    }
+    return out;
+}
+
 int main(int argc, char** argv) {
     AttentionConfig base{};
     base.batch   = 1;
@@ -180,21 +214,40 @@ int main(int argc, char** argv) {
     base.d_head  = 64;
     base.window_size = 256;   // sliding window width
 
-
-    const std::vector<int> seq_lens = {128, 256, 512, 1024, 2048, 4096, 8192};
+    // Defaults; can be overridden by env var SEQ_LENS or argv[2].
+    std::vector<int> seq_lens = {128, 256, 512, 1024, 2048, 4096, 8192};
+    // Defaults; can be overridden by env var IMPLS or argv[3].
+    std::vector<Impl> impls = {Impl::Naive, Impl::TiledOnline, Impl::TiledOnlineWmma, Impl::SparseWindow};
     const int warmup = 3, iters = 10;
 
     std::string tensor_dir = "tensors";
     if (argc > 1) tensor_dir = argv[1];
     mkdir(tensor_dir.c_str(), 0755);  // ignore EEXIST
 
+    if (const char* env = std::getenv("SEQ_LENS")) {
+        auto v = parse_int_csv(env);
+        if (!v.empty()) seq_lens = v;
+    }
+    if (argc > 2) {
+        auto v = parse_int_csv(argv[2]);
+        if (!v.empty()) seq_lens = v;
+    }
+    if (const char* env = std::getenv("IMPLS")) {
+        auto v = parse_impls_csv(env);
+        if (!v.empty()) impls = v;
+    }
+    if (argc > 3) {
+        auto v = parse_impls_csv(argv[3]);
+        if (!v.empty()) impls = v;
+    }
+
     cublasHandle_t handle; CUBLAS_CHECK(cublasCreate(&handle));
 
     printf("impl,seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err\n");
-    for (Impl impl : {Impl::Naive, Impl::TiledOnline, Impl::BandedWindow}) {
+    for (Impl impl : impls) {
         for (int S : seq_lens) {
             AttentionConfig cfg = base; cfg.seq_len = S;
-            bool check = (S <= 512) && (impl != Impl::BandedWindow);
+            bool check = (S <= 512) && (impl != Impl::SparseWindow);
             BenchResult r = benchmark_one(handle, cfg, impl, warmup, iters, check, tensor_dir);
             printf("%s,%d,%.3f,%.3f,%.3f,%.1f,%.1f,%s\n",
                    impl_name(r.impl), r.seq_len, r.mean_ms, r.min_ms, r.max_ms,
@@ -202,6 +255,7 @@ int main(int argc, char** argv) {
                    r.peak_bytes     / (1024.0 * 1024.0),
                    std::isnan(r.max_abs_err) ? "skip" :
                        std::to_string(r.max_abs_err).c_str());
+            fflush(stdout);
         }
     }
     cublasDestroy(handle);

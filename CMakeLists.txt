@@ -11,15 +11,14 @@ add_executable(bench
     main.cu
     src/wrappers/attention_naive.cu
     src/wrappers/attention_tiled_online.cu
+    src/wrappers/attention_tiled_online_wmma.cu
     src/kernels/kernels.cu
     src/kernels/tiled_online_attention.cu
+    src/kernels/tiled_online_attention_wmma.cu
     src/reference.cpp
-    src/kernels/window_mask.cu
-    src/wrappers/attention_window.cu
     src/kernels/fill.cu
-    src/wrappers/attention_banded_window.cu
-    src/kernels/banded.cu    
-    src/wrappers/attention_sparse_window.cu 
+    src/wrappers/attention_sparse_window.cu
+    src/kernels/banded.cu
 )
 target_include_directories(bench PRIVATE .)
 target_link_libraries(bench PRIVATE CUDA::cublas CUDA::cudart)

@@ -31,9 +31,19 @@ BATCH   = 1
 N_HEADS = 8
 D_HEAD  = 64
 D_MODEL = N_HEADS * D_HEAD
-SEQ_LENS = [128, 256, 512, 1024, 2048, 4096, 8192]
+DEFAULT_SEQ_LENS = [128, 256, 512, 1024, 2048, 4096, 8192]
 WARMUP = 3
 ITERS  = 10
+
+
+def parse_seq_lens(s: str):
+    out = []
+    for tok in s.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        out.append(int(tok))
+    return out
 
 
 def load_float32(path: str, expected_count: int) -> torch.Tensor:
@@ -153,16 +163,27 @@ def main():
                     help="Directory containing tensor dumps from the C++ benchmark")
     ap.add_argument("--no-header", action="store_true",
                     help="Skip CSV header (useful when concatenating with C++ output)")
+    ap.add_argument("--seq-lens", default=None,
+                    help="Comma-separated list of sequence lengths "
+                         "(env SEQ_LENS also honored). "
+                         f"Default: {','.join(str(s) for s in DEFAULT_SEQ_LENS)}")
     args = ap.parse_args()
 
     if not torch.cuda.is_available():
         print("ERROR: CUDA not available", file=sys.stderr)
         sys.exit(1)
 
+    seq_lens = DEFAULT_SEQ_LENS
+    env = os.environ.get("SEQ_LENS")
+    if env:
+        seq_lens = parse_seq_lens(env)
+    if args.seq_lens:
+        seq_lens = parse_seq_lens(args.seq_lens)
+
     if not args.no_header:
         print("impl,seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err")
 
-    for S in SEQ_LENS:
+    for S in seq_lens:
         try:
             r = benchmark_one(S, args.tensor_dir)
             print(f"{r['impl']},{r['seq_len']},{r['mean_ms']:.3f},"

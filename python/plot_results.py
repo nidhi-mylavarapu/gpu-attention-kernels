@@ -5,7 +5,6 @@ Reads all relevant CSVs, generates comparison plots in results/plots/.
 Run from repo root or from python/ directory; auto-detects.
 """
 
-import os
 import csv
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -44,26 +43,18 @@ def find_csvs():
 def plot_all(csvs):
     plt.figure(figsize=(8, 5.5))
 
-    # Plot order + style: baselines first, then sparse variants
     order = []
     if "naive" in csvs: order.append(("naive", "naive (full attention)", "k", "-", "o"))
     if "tiled" in csvs: order.append(("tiled", "tiled", "tab:gray", "-", "s"))
     if "tiled_online" in csvs: order.append(("tiled_online", "tiled_online", "tab:purple", "-", "^"))
 
-    # window_w* (mask-after-GEMM, no speedup)
-    for w in [64, 128, 256, 1024]:
-        key = f"window_w{w}"
-        if key in csvs:
-            order.append((key, f"window mask, w={w}", "tab:orange", ":", "x"))
-
-    # sparse_window_w* (the real deal)
-    sparse_colors = {"64": "tab:blue", "128": "tab:cyan",
-                     "256": "tab:green", "1024": "tab:red"}
+    sw_colors = {"64": "tab:blue", "128": "tab:cyan",
+                 "256": "tab:green", "1024": "tab:red"}
     for w in [64, 128, 256, 1024]:
         key = f"sparse_window_w{w}"
         if key in csvs:
             order.append((key, f"sparse window, w={w}",
-                          sparse_colors[str(w)], "-", "D"))
+                          sw_colors[str(w)], "-", "D"))
 
     for key, label, color, ls, marker in order:
         rows = load_csv(csvs[key])
@@ -126,10 +117,9 @@ def plot_speedup(csvs):
 
 
 # -------------------------------------------------------------------
-# Plot 3: window-mask (no-speedup) vs sparse_window, side by side
+# Plot 3: naive vs sparse_window across window sizes
 # -------------------------------------------------------------------
-def plot_mask_vs_sparse(csvs):
-    """Naive vs sparse window across multiple window sizes."""
+def plot_naive_vs_sparse_window(csvs):
     plt.figure(figsize=(8, 5))
 
     if "naive" in csvs:
@@ -137,15 +127,15 @@ def plot_mask_vs_sparse(csvs):
         plt.plot([r[0] for r in rows], [r[1] for r in rows],
                  "k-o", label="naive (full attention)", linewidth=1.8)
 
-    sparse_colors = {"64": "tab:blue", "128": "tab:cyan",
-                     "256": "tab:green", "1024": "tab:red"}
+    sw_colors = {"64": "tab:blue", "128": "tab:cyan",
+                 "256": "tab:green", "1024": "tab:red"}
     for w in [64, 128, 256, 1024]:
         key = f"sparse_window_w{w}"
         if key not in csvs:
             continue
         rows = load_csv(csvs[key])
         plt.plot([r[0] for r in rows], [r[1] for r in rows],
-                 color=sparse_colors[str(w)], linestyle="-", marker="D",
+                 color=sw_colors[str(w)], linestyle="-", marker="D",
                  label=f"sparse window, w={w}", linewidth=1.6)
 
     plt.xscale("log", base=2)
@@ -169,5 +159,5 @@ if __name__ == "__main__":
     print(f"Found CSVs: {sorted(csvs.keys())}")
     plot_all(csvs)
     plot_speedup(csvs)
-    plot_mask_vs_sparse(csvs)
+    plot_naive_vs_sparse_window(csvs)
     print(f"\nAll plots written to {PLOT_DIR}")

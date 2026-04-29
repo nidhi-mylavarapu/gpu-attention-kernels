@@ -20,7 +20,7 @@ struct AttentionWorkspace {
     float* Q = nullptr;         // [B, H, S, D]  after transpose
     float* K = nullptr;
     float* V = nullptr;
-    float* S = nullptr;         // [B, H, S, S]  attention scores
+    float* S = nullptr;         // dense: [B,H,S,S]; sparse_window: [B,H,S,W] band
     float* O = nullptr;         // [B, H, S, D]  attention output (pre-reshape)
     size_t total_bytes = 0;
 };
@@ -59,13 +59,15 @@ void attention_forward_tiled_online(
     cudaStream_t
 );
 
-void attention_forward_window(
-    cublasHandle_t handle,
-    const float* X, const float* Wq, const float* Wk, const float* Wv,
-    float* Out,
-    AttentionWorkspace& ws,
-    const AttentionConfig& cfg,
-    cudaStream_t stream
+// Same workspace + same outer pipeline as attention_forward_tiled_online,
+// but the attention core uses Tensor Cores (WMMA, FP16 inputs, FP32 accum).
+void attention_forward_tiled_online_wmma(
+    cublasHandle_t,
+    const float*, const float*, const float*, const float*,
+    float*,
+    AttentionWorkspace&,
+    const AttentionConfig&,
+    cudaStream_t
 );
 
 void attention_forward_sparse_window(
@@ -76,3 +78,8 @@ void attention_forward_sparse_window(
     const AttentionConfig& cfg,
     cudaStream_t stream
 );
+
+void allocate_workspace_sparse_window(
+    AttentionWorkspace& ws,
+    const AttentionConfig& cfg,
+    int window_size);

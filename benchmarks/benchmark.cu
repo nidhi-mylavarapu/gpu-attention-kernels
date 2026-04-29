@@ -68,6 +68,8 @@ static BenchResult benchmark_one(cublasHandle_t handle,
     AttentionWorkspace ws{};
     if (attention_fn == attention_forward_tiled_online) {
         allocate_workspace_tiled_online(ws, cfg);
+    } else if (attention_fn == attention_forward_sparse_window) {
+        allocate_workspace_sparse_window(ws, cfg, cfg.window_size);
     } else {
         allocate_workspace(ws, cfg);
     }
@@ -147,7 +149,7 @@ int main(int argc, char** argv) {
     std::string kernel = "naive";
     if (argc > 1) kernel = argv[1];
 
-    // Optional second arg: window size (only used for "window" kernel).
+    // Optional second arg: window size (for "sparse_window" only; must be even and > 0).
     int window_size_arg = 256;
     if (argc > 2) window_size_arg = std::atoi(argv[2]);
 
@@ -159,8 +161,6 @@ int main(int argc, char** argv) {
         attention_fn = attention_forward_tiled;
     } else if (kernel == "tiled_online") {
         attention_fn = attention_forward_tiled_online;
-    } else if (kernel == "window") {
-        attention_fn = attention_forward_window;
     } else if (kernel == "sparse_window") {
         attention_fn = attention_forward_sparse_window;
     } else {
@@ -169,7 +169,7 @@ int main(int argc, char** argv) {
     }
 
     std::string outpath = "../results/" + kernel;
-    if (kernel == "window" || kernel == "sparse_window")
+    if (kernel == "sparse_window")
         outpath += "_w" + std::to_string(window_size_arg);
     outpath += ".csv";
     std::ofstream fout(outpath);
@@ -180,14 +180,20 @@ int main(int argc, char** argv) {
     base.batch = 1;
     base.n_heads = 8;
     base.d_head = 64;
-    base.window_size = (kernel == "window" || kernel == "sparse_window") ? window_size_arg : 0;
+    base.window_size = (kernel == "sparse_window") ? window_size_arg : 0;
 
     const std::vector<int> seq_lens = {128, 256, 512, 1024, 2048, 4096};
 
     cublasHandle_t handle;
     CUBLAS_CHECK(cublasCreate(&handle));
 
-    if (kernel == "window" || kernel == "sparse_window") {
+    if (kernel == "sparse_window") {
+        if (base.window_size <= 0 || (base.window_size & 1)) {
+            fprintf(stderr,
+                "sparse_window: window_size must be positive and even (got %d)\n",
+                base.window_size);
+            return 1;
+        }
         printf("Running %s kernel with window_size=%d\n", kernel.c_str(), base.window_size);
     }
 
@@ -195,7 +201,9 @@ int main(int argc, char** argv) {
         AttentionConfig cfg = base;
         cfg.seq_len = S;
 
-        BenchResult r = benchmark_one(handle, cfg, 3, 10, S <= 512, attention_fn);
+        const bool check_ok =
+            S <= 512 && attention_fn != attention_forward_sparse_window;
+        BenchResult r = benchmark_one(handle, cfg, 3, 10, check_ok, attention_fn);
 
         fout << r.seq_len << ","
              << r.mean_ms << ","

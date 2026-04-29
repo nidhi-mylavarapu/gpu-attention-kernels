@@ -15,7 +15,4 @@ void launch_transpose_bhsd_to_bshd(const float* src, float* dst,
                                    int B, int H, int S, int D,
                                    cudaStream_t stream = 0);
 
-void launch_window_mask(float* S, int n_mats, int rows, int row_len,
-                        int window_size, cudaStream_t stream);
-
 void launch_fill(float* buf, size_t n, float val, cudaStream_t stream);
