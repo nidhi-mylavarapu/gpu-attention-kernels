@@ -57,7 +57,7 @@ def plot_speedup(csvs):
         xs = [r["seq_len"] for r in rows if r["seq_len"] in naive]
         ys = [naive[r["seq_len"]] / r["mean_ms"] for r in rows if r["seq_len"] in naive]
         plt.plot(xs, ys, marker="o", linewidth=2,
-                 color="tab:purple", label="flash")
+                 color="tab:purple", label="FlashAttention-2")
 
     for w in WINDOW_SIZES:
         key = f"banded_window_w{w}"
@@ -67,12 +67,14 @@ def plot_speedup(csvs):
         xs = [r["seq_len"] for r in rows if r["seq_len"] in naive]
         ys = [naive[r["seq_len"]] / r["mean_ms"] for r in rows if r["seq_len"] in naive]
         plt.plot(xs, ys, marker="D", linewidth=2,
-                 color=COLORS[w], label=f"banded window, w={w}")
+                 color=COLORS[w], label=f"sparse window, w={w}")
 
     plt.xscale("log", base=2)
     plt.xlabel("Sequence length")
+    plt.yscale("log", base=10)
+    plt.yticks([1, 10], [r"$10^0$", r"$10^1$"])
     plt.ylabel("Speedup vs naive (×)")
-    plt.title("Attention speedup vs naive")
+    plt.title("Speedup over naive: sparse window vs FlashAttention-2")
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.legend()
     plt.tight_layout()
@@ -96,7 +98,7 @@ def plot_memory(csvs):
         xs = [r["seq_len"] for r in rows if r["seq_len"] in naive]
         ys = [naive[r["seq_len"]] / r["peak_MB"] for r in rows if r["seq_len"] in naive]
         plt.plot(xs, ys, marker="o", linewidth=2,
-                 color="tab:purple", label="flash")
+                 color="tab:purple", label="FlashAttention-2")
 
     for w in WINDOW_SIZES:
         key = f"banded_window_w{w}"
@@ -106,12 +108,15 @@ def plot_memory(csvs):
         xs = [r["seq_len"] for r in rows if r["seq_len"] in naive]
         ys = [naive[r["seq_len"]] / r["peak_MB"] for r in rows if r["seq_len"] in naive]
         plt.plot(xs, ys, marker="D", linewidth=2,
-                 color=COLORS[w], label=f"banded window, w={w}")
+                 color=COLORS[w], label=f"sparse window, w={w}")
 
     plt.xscale("log", base=2)
+    plt.yscale("log", base=10)
+    plt.yticks([1, 10], [r"$10^0$", r"$10^1$"])
+
     plt.xlabel("Sequence length")
     plt.ylabel("Memory reduction vs naive (×)")
-    plt.title("Attention memory reduction vs naive")
+    plt.title("Memory reduction over naive: sparse window vs FlashAttention-2")
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.legend()
     plt.tight_layout()

@@ -1,0 +1,7 @@
+tiled_online_wmma    128      0.114    0.114   0.117   1.8           442.1    0.000001
+tiled_online_wmma    256      0.164    0.163   0.164   3.5           444.1    0.000001
+tiled_online_wmma    512      0.265    0.264   0.265   7.0           450.1    0.000001
+tiled_online_wmma    1024     0.559    0.558   0.560   14.0          458.1    skip
+tiled_online_wmma    2048     1.243    1.242   1.245   28.0          476.1    skip
+tiled_online_wmma    4096     3.866    3.862   3.870   56.0          512.1    skip
+tiled_online_wmma    8192     14.288   14.282  14.296  112.0         584.1    skip

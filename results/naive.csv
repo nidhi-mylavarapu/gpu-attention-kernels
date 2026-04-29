@@ -1,0 +1,8 @@
+impl,seq_len,mean_ms,min_ms,max_ms,workspace_MB,peak_MB,max_abs_err
+naive_cublas,128,0.162,0.161,0.163,2.2,442.1,0.000000
+naive_cublas,256,0.216,0.214,0.217,5.5,446.1,0.000000
+naive_cublas,512,0.346,0.345,0.347,15.0,458.1,0.000000
+naive_cublas,1024,0.648,0.646,0.650,46.0,490.1,skip
+naive_cublas,2048,1.925,1.923,1.927,156.0,604.1,skip
+naive_cublas,4096,5.775,5.274,5.835,568.0,1024.1,skip
+naive_cublas,8192,17.400,17.325,17.491,2160.0,2632.1,skip
